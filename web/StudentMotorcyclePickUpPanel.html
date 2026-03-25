@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Choose Pick Up Location</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom, rgba(19, 84, 122, 0.5), rgba(128, 208, 199, 0.5)),
+                        url('resources/Campus.jpg') no-repeat center center fixed;
+            background-size: cover;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 0 10px;
+            box-sizing: border-box;
+        }
+
+        .panel {
+            background-color: white;
+            width: 100%;
+            max-width: 480px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            min-height: 100vh;
+        }
+
+        .header {
+            /*background: linear-gradient(to right, #0072BB, #80D0C7);*/
+            background-color: #0072BB;
+            padding: 15px 20px;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .header a {
+            color: white;
+            text-decoration: none;
+            font-weight: normal;
+            font-size: 14px;
+        }
+
+        .body {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .flex-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        select, input[type="text"], button {
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+
+        .view-toggle {
+            display: flex;
+            justify-content: space-between;
+            border: 1px solid #ccc;
+            border-radius: 30px;
+            overflow: hidden;
+            background-color: #f0f0f0;
+        }
+
+        .view-toggle button {
+            flex: 1;
+            padding: 10px 0;
+            border: none;
+            background-color: transparent;
+            color: #333;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .view-toggle button.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        #searchInput,
+        #searchResults,
+        #infoPanel,
+        #useLocationBtn {
+            display: none;
+        }
+        
+        #map {
+            display: block;
+        }
+
+        #searchResults li {
+            padding: 8px;
+            border: 1px solid #ccc;
+            background-color: #fff;
+            cursor: pointer;
+        }
+
+        #searchResults li:hover {
+            background-color: #d0edf7;
+        }
+
+        #map {
+            height: 50vh;
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+        }
+
+        .info-panel {
+            padding: 10px;
+        }
+
+        .info-panel label {
+            font-weight: bold;
+        }
+
+        .info-panel button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 480px) {
+            .header {
+                font-size: 16px;
+                padding: 16px 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="panel">
+    <div class="header">
+        <span>Choose Pick Up Location</span>
+        <a href="StudentMotorcyclePanel.jsp">Cancel</a>
+    </div>
+
+    <div class="body">
+        <div class="flex-row">
+            <div class="view-toggle">
+                <button id="searchViewBtn" onclick="toggleView('search')">Search</button>
+                <button id="mapViewBtn" onclick="toggleView('map')">Map</button>
+            </div>
+
+            <select id="citySelect">
+                <option value="" disabled selected>- Select City -</option>
+                <option>Basay</option>
+                <option>Bayawan City</option>
+                <option>Santa Catalina</option>
+            </select>
+
+            <input type="text" id="searchInput" placeholder="Search Address..." oninput="searchRealAddress()" />
+            <ul id="searchResults"></ul>
+        </div>
+
+        <button id="useLocationBtn" onclick="getCurrentLocation()">
+            <i class="fas fa-map-pin"></i> Use My Current Location
+          </button>
+
+
+        <div id="map"></div>
+
+        <div id="infoPanel" class="info-panel">
+            <div id="addressContainer" style="display: none;">
+                <label>Selected Address:</label>
+                <div id="selectedAddress">Not selected</div>
+                <form method="post" action="StudentSetMotorcyclePickUpLocationMapServlet">
+                    <input type="hidden" name="address" id="addressField" />
+                    <input type="hidden" name="lat" id="latField" />
+                    <input type="hidden" name="lng" id="lngField" />
+                    <input type="hidden" name="cityName" id="cityNameField" />
+                    <button type="submit" id="confirmBtn" disabled>Confirm Pickup Location</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+    let currentView = "search";
+    let marker = null;
+    let selectedCity = "";
+
+    const cityCenters = {
+        "Basay": [9.4099, 122.6409],
+        "Bayawan City": [9.3661, 122.8048],
+        "Santa Catalina": [9.333, 122.867]
+    };
+
+    const map = L.map('map').setView([9.3584, 122.8122], 10);
+    
+    // Define bounds for all allowed cities
+    /*var allowedBounds = L.latLngBounds([
+      [9.3170, 122.7446],  // Southwest corner (Basay)
+      [9.4464, 122.8347]   // Northeast corner (Santa Catalina)
+    ]);
+
+    // Center map to show all cities
+    var map = L.map('map').fitBounds(allowedBounds);*/
+
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    function toggleView(view) {
+        currentView = view;
+        const cityId = document.getElementById("citySelect").value;
+
+        document.getElementById("searchViewBtn").classList.toggle("active", view === "search");
+        document.getElementById("mapViewBtn").classList.toggle("active", view === "map");
+
+        const searchInput = document.getElementById("searchInput");
+        const searchResults = document.getElementById("searchResults");
+        const mapDiv = document.getElementById("map");
+        const infoPanel = document.getElementById("infoPanel");
+        const locationBtn = document.getElementById("useLocationBtn");
+
+        if (view === "search") {
+            searchInput.style.display = "block";
+            searchResults.style.display = "block";
+            mapDiv.style.display = "none";
+            locationBtn.style.display = "none";
+        } else {
+            searchInput.style.display = "none";
+            searchResults.style.display = "none";
+            mapDiv.style.display = "block";
+            locationBtn.style.display = "block";
+            focusMapOnCity(selectedCity);
+        }
+
+        infoPanel.style.display = "block";
+        resetSelection();
+    }
+
+    function resetSelection() {
+        if (marker) map.removeLayer(marker);
+        marker = null;
+        document.getElementById("selectedAddress").textContent = "Not selected";
+        document.getElementById("addressField").value = "";
+        document.getElementById("latField").value = "";
+        document.getElementById("lngField").value = "";
+        document.getElementById("cityNameField").value = "";
+        document.getElementById("confirmBtn").disabled = true;
+        document.getElementById("addressContainer").style.display = "none";
+    }
+
+    async function searchRealAddress() {
+        const keyword = document.getElementById("searchInput").value;
+        const city = selectedCity;
+        const list = document.getElementById("searchResults");
+        list.innerHTML = "";
+
+        if (!keyword || !city) return;
+
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(keyword + ", " + city + ", Negros Oriental, Philippines")}`);
+        const data = await res.json();
+
+        data.slice(0, 5).forEach(item => {
+            const li = document.createElement("li");
+            li.textContent = item.display_name;
+            li.addEventListener("click", () => {
+                const cleanAddress = item.display_name
+                    .replace(/\b(Dumaguete South Road|, Negros Island Region|Philippines|6220|6221|6222),?\s*/gi, '')
+                    .trim();
+
+                updateSelection(item.lat, item.lon, cleanAddress, city);
+                list.innerHTML = "";
+            });
+            list.appendChild(li);
+        });
+    }
+
+    function focusMapOnCity(cityName) {
+        if (cityCenters[cityName]) {
+            setTimeout(() => {
+                map.invalidateSize();
+                map.setView(cityCenters[cityName], 14);
+            }, 100);
+        }
+    }
+
+    document.getElementById("citySelect").addEventListener("change", function () {
+        selectedCity = this.options[this.selectedIndex].text;
+        toggleView(currentView);
+    });
+
+    map.on('click', async (e) => {
+        const { lat, lng } = e.latlng;
+        const address = await reverseGeocode(lat, lng);
+        updateSelection(lat, lng, address, selectedCity);
+    });
+
+    async function reverseGeocode(lat, lng) {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+        const data = await res.json();
+        return data.display_name
+            .replace(/\b(Dumaguete South Road|, Negros Island Region|Philippines|6220|6221|6222),?\s*/gi, '')
+            .trim();
+    }
+
+    function updateSelection(lat, lng, address, city) {
+        if (marker) map.removeLayer(marker);
+        marker = L.marker([lat, lng]).addTo(map).bindPopup("Pickup: " + address).openPopup();
+
+        document.getElementById("selectedAddress").textContent = address;
+        document.getElementById("addressField").value = address;
+        document.getElementById("latField").value = lat;
+        document.getElementById("lngField").value = lng;
+        document.getElementById("cityNameField").value = city;
+        document.getElementById("confirmBtn").disabled = false;
+        document.getElementById("addressContainer").style.display = "block";
+    }
+
+    async function getCurrentLocation() {
+        if (!navigator.geolocation) {
+            alert("Geolocation is not supported by your browser.");
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(async (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const address = await reverseGeocode(lat, lng);
+            map.setView([lat, lng], 18);
+            updateSelection(lat, lng, address, selectedCity);
+        }, () => {
+            alert("Unable to retrieve your location.");
+        });
+    }
+    
+    window.addEventListener("DOMContentLoaded", () => {
+        toggleView("search");
+    });
+</script>
+</body>
+</html>

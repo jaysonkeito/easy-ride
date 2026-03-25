@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Driver Ride Tracking</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(to bottom, rgba(19, 84, 122, 0.5), rgba(128, 208, 199, 0.5)),
+                        url('resources/Campus.jpg') no-repeat center center fixed;
+            background-size: cover;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+            color: #fff;
+        }
+
+        header {
+            width: 100%;
+            background-color: #0072BB;
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-sizing: border-box;
+        }
+
+        header img {
+            height: 50px;
+        }
+
+        .header-text-desktop {
+            display: block;
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.7);
+        }
+
+        .header-text-mobile {
+            display: none;
+        }
+
+        #map {
+            width: 100%;
+            max-width: 800px;
+            height: 450px;
+            margin: 20px auto 80px auto; /* Leave space for bottom controls */
+            border: 2px solid #0072BB;
+            border-radius: 8px;
+        }
+
+        .bottom-controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.98);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            z-index: 1001;
+            box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .bottom-controls button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            transition: background-color 0.2s;
+        }
+
+        .bottom-controls button:hover {
+            background-color: #0056b3;
+        }
+
+        @media (max-width: 600px) {
+            #map {
+                height: 300px;
+                margin-bottom: 100px;
+            }
+
+            .bottom-controls {
+                flex-direction: column;
+            }
+
+            .bottom-controls button {
+                width: 90%;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <img src="resources/EasyRideDriver.png" alt="Logo" />
+    <div class="header-text-desktop">EasyRide NORSU Driver</div>
+    <img src="resources/NorsuLogo.png" alt="Logo" />
+</header>
+
+<div id="map"></div>
+
+<div class="bottom-controls" id="controlButtons">
+    <button onclick="window.location.href='DriverDashboard.jsp'">Return to Dashboard</button>
+</div>
+
+<script>
+    const map = L.map('map').setView([9.3, 123.3], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let driverMarker = null;
+    const transactionNumber = new URLSearchParams(window.location.search).get('transactionNumber');
+    const driverUsername = '<%= session.getAttribute("driverUsername") %>';
+
+    function updateDriverLocation(lat, lng) {
+        fetch('DriverUpdateLocationServlet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `username=${encodeURIComponent(driverUsername)}&latitude=${lat}&longitude=${lng}`
+        }).then(() => {
+            if (driverMarker) {
+                driverMarker.setLatLng([lat, lng]);
+            } else {
+                driverMarker = L.marker([lat, lng], { title: "Your Location" }).addTo(map);
+            }
+            map.setView([lat, lng], 16);
+        }).catch(err => {
+            console.error("Location update failed:", err);
+        });
+    }
+
+    function startTracking() {
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(
+                pos => updateDriverLocation(pos.coords.latitude, pos.coords.longitude),
+                err => alert("Location access denied or unavailable."),
+                { enableHighAccuracy: true, maximumAge: 0 }
+            );
+        } else {
+            alert("Geolocation is not supported by this browser.");
+        }
+    }
+
+    function updateRideStatus(transactionNumber, status) {
+        fetch('DriverUpdateRideStatusServlet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `transactionNumber=${encodeURIComponent(transactionNumber)}&action=${encodeURIComponent(status)}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === "success") {
+                alert("Ride status updated to " + status);
+                if (status === "Completed" || status === "Cancelled") {
+                    window.location.href = "DriverDashboard.jsp";
+                } else {
+                    renderControlButtons(status);
+                }
+            } else {
+                alert("Failed to update ride: " + (data.message || "Unknown error"));
+            }
+        })
+        .catch(error => {
+            console.error("Ride update error:", error);
+            alert("Error updating ride status.");
+        });
+    }
+
+    function loadRideMarkers() {
+        fetch(`DriverGetRideDetailsServlet?transactionNumber=${encodeURIComponent(transactionNumber)}`)
+            .then(response => response.json())
+            .then(data => {
+                const pickup = L.marker([data.pickupLat, data.pickupLng], {
+                    icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png' })
+                }).addTo(map).bindPopup("Pickup Location");
+
+                const dropoff = L.marker([data.dropoffLat, data.dropoffLng], {
+                    icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png' })
+                }).addTo(map).bindPopup("Drop-off Location");
+
+                const group = L.featureGroup([pickup, dropoff]);
+                map.fitBounds(group.getBounds().pad(0.5));
+
+                renderControlButtons(data.status);
+            })
+            .catch(err => {
+                console.error("Error loading ride details:", err);
+                alert("Failed to load ride locations.");
+            });
+    }
+
+    function renderControlButtons(status) {
+        const container = document.getElementById('controlButtons');
+        container.innerHTML = `<button onclick="window.location.href='DriverDashboard.jsp'">Return to Dashboard</button>`;
+
+        if (status === "Accepted") {
+            container.innerHTML += `<button onclick="updateRideStatus('${transactionNumber}', 'Ongoing')">Start Ride</button>`;
+        } else if (status === "Ongoing") {
+            container.innerHTML += `
+                <button onclick="updateRideStatus('${transactionNumber}', 'Cancelled')">Cancel Ride</button>
+                <button onclick="updateRideStatus('${transactionNumber}', 'Completed')">End Ride</button>`;
+        }
+    }
+
+    startTracking();
+    loadRideMarkers();
+</script>
+
+</body>
+</html>
